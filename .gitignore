@@ -1,0 +1,9 @@
+# PyCharm
+.idea/deployment.xml
+.idea/misc.xml
+.idea/workspace.xml
+.idea/libraries/
+.idea/sw-python-common.iml
+
+# Python
+__pycache__
