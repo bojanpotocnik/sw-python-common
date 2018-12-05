@@ -1,6 +1,7 @@
 # PyCharm
 .idea/deployment.xml
 .idea/misc.xml
+.idea/other.xml
 .idea/workspace.xml
 .idea/libraries/
 .idea/sw-python-common.iml
