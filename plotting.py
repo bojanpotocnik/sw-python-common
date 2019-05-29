@@ -14,6 +14,8 @@ import matplotlib
 # `import matplotlib.pyplot as plt` is at the end of the file as the backend must be switched first.
 import matplotlib.backend_bases
 from matplotlib.axes import Axes
+from matplotlib.backend_bases import (Event, DrawEvent, ResizeEvent, CloseEvent, LocationEvent,
+                                      MouseEvent, PickEvent, KeyEvent)
 from matplotlib.backends.backend_template import FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -281,6 +283,7 @@ class LegendLocation(enum.Enum):
 # noinspection SpellCheckingInspection
 def legend(axes_: Sequence[Axes], loc: Union[LegendLocation, str] = LegendLocation.BEST,
            *args,
+           remove_duplicates: bool = True,
            fancybox: Optional[bool] = True, framealpha: Optional[float] = 0.7,
            **kwargs) -> None:
     # noinspection SpellCheckingInspection
@@ -288,26 +291,33 @@ def legend(axes_: Sequence[Axes], loc: Union[LegendLocation, str] = LegendLocati
     Add combined legend for all specified axes. Useful when using double-y (twinx) axis.
     Idea from `Secondary axis with twinx(): how to add to legend? <https://stackoverflow.com/a/10129461/5616255>`_.
 
-    :param axes_:      Axes of which legends to combine.
-    :param loc:        The location of the legend.
-    :param args:       Other arguments to pass to the `matplotlib.axes.legend()`.
-    :param fancybox:   Control whether round edges should be enabled around the `FancyBboxPatch` which makes up the
-                       legend's background.
-                       Default is None, which will take the value from `rcParams["legend.fancybox"]`.
-    :param framealpha: Control the alpha transparency of the legend's background. Default is None, which will take the
-                       value from `rcParams["legend.framealpha"]`. If shadow is activated and framealpha is None,
-                       the default value is ignored.
+    :param axes_:             Axes of which legends to combine.
+    :param loc:               The location of the legend.
+    :param args:              Other arguments to pass to the `matplotlib.axes.legend()`.
+    :param remove_duplicates: Whether to remove duplicate labels (useful when plotting multiple distinct lines
+                              of the same data (e.g. picewise, multipart, non-continious functions, ...).
+                              This is true only for the same axis - the same labels on two different Axes
+                              will be preserved.
+    :param fancybox:          Control whether round edges should be enabled around the `FancyBboxPatch` which
+                              makes up the legend's background.
+                              Default is None, which will take the value from `rcParams["legend.fancybox"]`.
+    :param framealpha:        Control the alpha transparency of the legend's background. Default is None,
+                              which will take the value from `rcParams["legend.framealpha"]`. If shadow is
+                              activated and framealpha is None, the default value is ignored.
 
     :param kwargs: Other keyword arguments to pass to the `matplotlib.axes.legend()`.
     """
     # Get plotted objects and their labels
-    lines = []
-    labels = []
+    all_handles = []
+    all_labels = []
     for axis in axes_:
-        lines_, labels_ = axis.get_legend_handles_labels()
-        lines.extend(lines_)
-        labels.extend(labels_)
-    axes_[0].legend(lines, labels, *args, loc=(loc.value if isinstance(loc, LegendLocation) else loc),
+        handles, labels = axis.get_legend_handles_labels()
+        if remove_duplicates:
+            labels, label_ids = np.unique(labels, return_index=True)
+            handles = [handles[i] for i in label_ids]
+        all_handles.extend(handles)
+        all_labels.extend(labels)
+    axes_[0].legend(all_handles, all_labels, *args, loc=(loc.value if isinstance(loc, LegendLocation) else loc),
                     fancybox=fancybox, framealpha=framealpha, **kwargs)
 
 
@@ -436,7 +446,7 @@ def save_png(fig: Figure, path: Union[None, str, pathlib.Path],
     return ret
 
 
-class Event(enum.Enum):
+class EventType(enum.Enum):
     """Matplotlib event."""
 
     MOUSE_BUTTON_PRESS = "button_press_event"
@@ -464,6 +474,14 @@ class Event(enum.Enum):
     Event triggered when mouse motion is detected.
     Callback signature is `on_mouse_button_press(event: matplotlib.backend_bases.MouseEvent)`.
     """
+    PICK = "pick_event"
+    """
+    Event triggered when an object in the canvas is selected (when the user picks a location 
+    on the canvas sufficiently close to an artist).
+    Callback signature is `on_pick(event: matplotlib.backend_bases.PickEvent)`.
+    Note that the `picker property of the Artist must be set 
+    <https://matplotlib.org/users/event_handling.html#object-picking>`_ to enable picking.
+    """
     CLOSE = "close_event"
     """
     Event triggered when the figure closes.
@@ -471,8 +489,13 @@ class Event(enum.Enum):
     """
 
 
-def register_event(fig: Union[Figure, FigureCanvas],
-                   event: Event, callback: Callable[[matplotlib.backend_bases.Event], None]) -> int:
+EventCallback = Callable[[Union[Event,
+                                DrawEvent, ResizeEvent, CloseEvent,
+                                LocationEvent, MouseEvent, PickEvent, KeyEvent]
+                          ], None]
+
+
+def register_event(fig: Union[Figure, FigureCanvas], event: EventType, callback: EventCallback) -> int:
     """
     Register `event handling <https://matplotlib.org/users/event_handling.html>`_ for the figure.
     One example is `close event <https://matplotlib.org/gallery/event_handling/close_event.html>`_.
@@ -574,9 +597,9 @@ def add_mouse_tracking_vertical_line(fig: Figure, to_axes: Optional[Union[Axes, 
     _mouse_tracking_vertical_lines[fig.canvas] = {ax: None for ax in to_axes if ax}
 
     # Register event to handle mouse move and draw lines.
-    mouse_cid = register_event(fig, Event.MOUSE_MOVE, on_mouse_move)
+    mouse_cid = register_event(fig, EventType.MOUSE_MOVE, on_mouse_move)
     # Register event to clear the dictionary when the figure is closed.
-    close_cid = register_event(fig, Event.CLOSE, on_close)
+    close_cid = register_event(fig, EventType.CLOSE, on_close)
     # Save the event callback IDs to enable deletion.
     _mouse_tracking_vertical_lines_cid[fig.canvas] = (mouse_cid, close_cid)
 
@@ -640,5 +663,4 @@ if not is_interactive_possible():
     warnings.warn("Plotting is not possible in this environment, switching to matplotlib backend 'Agg'.")
     use_non_interactive()
 
-# noinspection PyPep8
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa (suppress "PEP 8: Module level import not at top of file")
